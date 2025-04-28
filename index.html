@@ -1,0 +1,302 @@
+<html>
+    <head>
+        <title>Tron 2.5D - Controles Invertidos Corretos</title>
+        <style>
+            body { margin: 0; overflow: hidden; }
+            canvas { display: block; }
+        </style>
+        <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+        <script>
+            // CONFIG
+            const gridSize = 20;
+            let cellSize;
+            
+            // ESTADO DO JOGO
+            const map = [];
+            const player = { x: 0, y: 0, d: 0, col: 0x00FF00 };
+            const AI = [
+                { x: 0, y: 0, d: 0, col: 0xFF0000 },
+                { x: 0, y: 0, d: 0, col: 0xFF00FF },
+                { x: 0, y: 0, d: 0, col: 0x0000FF }
+            ];
+            const dirQueue = [];
+            
+            // THREE.JS
+            let scene, camera, renderer;
+            
+            function init() {
+                // Calcula tamanho da célula
+                cellSize = Math.min(window.innerWidth, window.innerHeight) / (gridSize * 1.2);
+                
+                // CENA
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x000000);
+                
+                // CÂMERA DIAGONAL (45 graus)
+                camera = new THREE.PerspectiveCamera(
+                    45,
+                    window.innerWidth / window.innerHeight,
+                    0.1,
+                    1000
+                );
+                
+                // Posição da câmera (vista diagonal)
+                camera.position.set(
+                    gridSize * cellSize * 0.5,    // Centro X
+                    gridSize * cellSize * 0.8,    // Altura
+                    -gridSize * cellSize * 0.6    // Distância (negativo para vir de frente)
+                );
+                
+                // Mira no centro da grid
+                camera.lookAt(
+                    gridSize * cellSize * 0.5,
+                    0,
+                    gridSize * cellSize * 0.5
+                );
+                
+                // RENDERIZADOR
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                document.body.appendChild(renderer.domElement);
+                
+                // ILUMINAÇÃO
+                const ambientLight = new THREE.AmbientLight(0x404040);
+                scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(0.5, 1, 0.5);
+                scene.add(directionalLight);
+                
+                // PISO E GRADE
+                createFloor();
+                
+                // INICIALIZA JOGO
+                initGame();
+                
+                // CONTROLES INVERTIDOS COMO SOLICITADO
+                window.addEventListener('keydown', keyListener);
+                window.addEventListener('resize', onWindowResize);
+                renderer.domElement.addEventListener('touchstart', handleTouchStart, false);
+                renderer.domElement.addEventListener('touchmove', handleTouchMove, false);
+                
+                // INICIA
+                animate();
+            }
+            
+            function createFloor() {
+                // GRADE
+                const gridHelper = new THREE.GridHelper(
+                    gridSize * cellSize,
+                    gridSize,
+                    0x333333,
+                    0x333333
+                );
+                gridHelper.position.set(
+                    gridSize * cellSize * 0.5,
+                    -0.1,
+                    gridSize * cellSize * 0.5
+                );
+                scene.add(gridHelper);
+                
+                // CHÃO SÓLIDO
+                const floorGeometry = new THREE.PlaneGeometry(
+                    gridSize * cellSize,
+                    gridSize * cellSize
+                );
+                const floorMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x222222,
+                    side: THREE.DoubleSide
+                });
+                const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+                floor.rotation.x = -Math.PI / 2;
+                floor.position.set(
+                    gridSize * cellSize * 0.5,
+                    -0.2,
+                    gridSize * cellSize * 0.5
+                );
+                scene.add(floor);
+            }
+            
+            function initGame() {
+                // INICIALIZA MAPA
+                for (let i = 0; i < gridSize; i++) {
+                    map[i] = [];
+                    for (let j = 0; j < gridSize; j++) {
+                        map[i][j] = null;
+                    }
+                }
+                
+                // POSIÇÕES INICIAIS
+                player.x = Math.floor(Math.random() * gridSize);
+                player.y = Math.floor(Math.random() * gridSize);
+                
+                AI.forEach(ai => {
+                    ai.x = Math.floor(Math.random() * gridSize);
+                    ai.y = Math.floor(Math.random() * gridSize);
+                    ai.d = Math.floor(Math.random() * 4);
+                });
+            }
+            
+            function drawCube(x, y, color, isPlayer = false) {
+                // Remove cubo existente
+                if (map[x][y] && map[x][y].mesh) {
+                    scene.remove(map[x][y].mesh);
+                }
+                
+                // CUBO 3D PROPORCIONAL
+                const size = cellSize * 0.9;
+                const geometry = new THREE.BoxGeometry(size, size, size);
+                const material = new THREE.MeshStandardMaterial({
+                    color: color,
+                    emissive: color,
+                    emissiveIntensity: 0.3,
+                    metalness: 0.7
+                });
+                
+                const cube = new THREE.Mesh(geometry, material);
+                cube.position.set(
+                    x * cellSize + cellSize * 0.5,
+                    size * 0.5,
+                    y * cellSize + cellSize * 0.5
+                );
+                
+                scene.add(cube);
+                map[x][y] = { mesh: cube, isPlayer };
+                
+                // Destaque para o jogador
+                if (isPlayer) {
+                    const light = new THREE.PointLight(color, 1, cellSize * 2);
+                    cube.add(light);
+                }
+                
+                return cube;
+            }
+            
+            function update() {
+                // JOGADOR - CONTROLES INVERTIDOS COMO SOLICITADO
+                if (!map[player.x] || !map[player.x][player.y] || map[player.x][player.y].isPlayer) {
+                    drawCube(player.x, player.y, player.col, true);
+                    
+                    if (dirQueue.length > 0) {
+                        player.d = dirQueue.pop();
+                    }
+                    
+                    // DIREÇÕES INVERTIDAS:
+                    // 0 = baixo (Y+)
+                    // 1 = esquerda (X-)
+                    // 2 = cima (Y-)
+                    // 3 = direita (X+)
+                    switch(player.d) {
+                        case 0: player.y++; break; // Baixo (inverte cima)
+                        case 1: player.x--; break; // Esquerda (inverte direita)
+                        case 2: player.y--; break; // Cima (inverte baixo)
+                        case 3: player.x++; break; // Direita (inverte esquerda)
+                    }
+                    
+                    // Wrap-around
+                    if (player.x < 0) player.x = gridSize - 1;
+                    if (player.y < 0) player.y = gridSize - 1;
+                    if (player.x >= gridSize) player.x = 0;
+                    if (player.y >= gridSize) player.y = 0;
+                } else {
+                    console.log("Game Over");
+                }
+                
+                // IA (mantém lógica original)
+                AI.forEach(ai => {
+                    if (!map[ai.x] || !map[ai.x][ai.y] || map[ai.x][ai.y].isPlayer) {
+                        drawCube(ai.x, ai.y, ai.col);
+                        
+                        const obst = [
+                            map[ai.x][(ai.y-1 + gridSize) % gridSize] !== null,
+                            map[(ai.x+1) % gridSize][ai.y] !== null,
+                            map[ai.x][(ai.y+1) % gridSize] !== null,
+                            map[(ai.x-1 + gridSize) % gridSize][ai.y] !== null
+                        ];
+                        
+                        if (obst[ai.d]) {
+                            const opts = [!obst[(ai.d+1) % 4], !obst[(ai.d+3) % 4]];
+                            if (opts[0] && opts[1]) {
+                                ai.d = (ai.d + (Math.random() > 0.5 ? 1 : 3)) % 4;
+                            } else if (opts[0]) {
+                                ai.d = (ai.d + 1) % 4;
+                            } else if (opts[1]) {
+                                ai.d = (ai.d + 3) % 4;
+                            }
+                        }
+                        
+                        switch(ai.d) {
+                            case 0: ai.y = (ai.y - 1 + gridSize) % gridSize; break;
+                            case 1: ai.x = (ai.x + 1) % gridSize; break;
+                            case 2: ai.y = (ai.y + 1) % gridSize; break;
+                            case 3: ai.x = (ai.x - 1 + gridSize) % gridSize;
+                        }
+                    }
+                });
+            }
+            
+            function animate() {
+                requestAnimationFrame(animate);
+                update();
+                renderer.render(scene, camera);
+            }
+            
+            function onWindowResize() {
+                cellSize = Math.min(window.innerWidth, window.innerHeight) / (gridSize * 1.2);
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+            
+            function keyListener(e) {
+                // CONTROLES INVERTIDOS EXATAMENTE COMO SOLICITADO:
+                // ↑ (Cima) = Move para baixo (Y+)
+                // ↓ (Baixo) = Move para cima (Y-)
+                // → (Direita) = Move para esquerda (X-)
+                // ← (Esquerda) = Move para direita (X+)
+                switch(e.key) {
+                    case 'ArrowUp': dirQueue.unshift(0); break;    // Cima = Baixo
+                    case 'ArrowRight': dirQueue.unshift(1); break; // Direita = Esquerda
+                    case 'ArrowDown': dirQueue.unshift(2); break;  // Baixo = Cima
+                    case 'ArrowLeft': dirQueue.unshift(3); break;  // Esquerda = Direita
+                    
+                    // Teclas WASD também invertidas
+                    case 'w': dirQueue.unshift(0); break; // W = Baixo
+                    case 'd': dirQueue.unshift(1); break; // D = Esquerda
+                    case 's': dirQueue.unshift(2); break; // S = Cima
+                    case 'a': dirQueue.unshift(3); break; // A = Direita
+                }
+            }
+            
+            // Touch controls invertidos
+            let xDown = null, yDown = null;
+            function handleTouchStart(e) {
+                xDown = e.touches[0].clientX;
+                yDown = e.touches[0].clientY;
+            }
+            function handleTouchMove(e) {
+                if (!xDown || !yDown) return;
+                
+                const xUp = e.touches[0].clientX;
+                const yUp = e.touches[0].clientY;
+                const xDiff = xDown - xUp;
+                const yDiff = yDown - yUp;
+                
+                if (Math.abs(xDiff) > Math.abs(yDiff)) {
+                    // Movimento horizontal invertido
+                    if (xDiff > 10) dirQueue.unshift(1); // Swipe esquerda = Esquerda (X-)
+                    else if (xDiff < -10) dirQueue.unshift(3); // Swipe direita = Direita (X+)
+                } else {
+                    // Movimento vertical invertido
+                    if (yDiff > 10) dirQueue.unshift(0); // Swipe para cima = Baixo (Y+)
+                    else if (yDiff < -10) dirQueue.unshift(2); // Swipe para baixo = Cima (Y-)
+                }
+                
+                xDown = yDown = null;
+            }
+            
+            window.onload = init;
+        </script>
+    </head>
+    <body></body>
+</html>
