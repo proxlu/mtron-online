@@ -284,8 +284,8 @@
                 
                 if (Math.abs(xDiff) > Math.abs(yDiff)) {
                     // Movimento horizontal invertido
-                    if (xDiff > 10) dirQueue.unshift(1); // Swipe esquerda = Esquerda (X-)
-                    else if (xDiff < -10) dirQueue.unshift(3); // Swipe direita = Direita (X+)
+                    if (xDiff > 10) dirQueue.unshift(3); // Swipe esquerda = Esquerda (X-)
+                    else if (xDiff < -10) dirQueue.unshift(1); // Swipe direita = Direita (X+)
                 } else {
                     // Movimento vertical invertido
                     if (yDiff > 10) dirQueue.unshift(0); // Swipe para cima = Baixo (Y+)
